@@ -125,23 +125,36 @@ export default function Home() {
       </div>
 
       {/* 2. 地图展示区域 */}
-      <div className="relative w-full h-44 rounded-3xl border border-gray-50 overflow-hidden shadow-sm">
-        <iframe
-  width="100%"
-  height="100%"
-  style={{ border: 0 }}
-  loading="lazy"
-  allowFullScreen
-  referrerPolicy="no-referrer-when-downgrade"
-  // 这是一个指向 Imperial College London 的真实 Embed 链接
-  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2483.540424380277!2d-0.1774290233795676!3d51.4983083718104!2m3!1f0!2f0!3f0!3m2!1i1024!2i1024!4f13.1!3m3!1m2!1s0x4876056ea04a1f59%3A0x6b801f92e44d3d7!2sImperial%20College%20London!5e0!3m2!1sen!2suk!4v1710110000000!5m2!1sen!2suk"
-  className="absolute inset-0 grayscale-[10%] opacity-90"
-></iframe>
+<div className="relative w-full h-44 rounded-3xl border border-gray-50 overflow-hidden shadow-sm group">
+  {/* 真实的 Google Maps 嵌入链接 (Imperial College London) */}
+  <iframe
+    width="100%"
+    height="100%"
+    style={{ border: 0 }}
+    loading="lazy"
+    allowFullScreen
+    referrerPolicy="no-referrer-when-downgrade"
+    src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2483.546427362145!2d-0.1774351!3d51.4988!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x4876056501a3038f%3A0x673f46f49635f29d!2sImperial%20College%20London!5e0!3m2!1sen!2suk!4v1710100000000!5m2!1sen!2suk"
+    className="absolute inset-0 grayscale-[20%] opacity-90 group-hover:grayscale-0 transition-all duration-500"
+  ></iframe>
 
-        <div className="absolute top-3 left-4 bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-lg shadow-sm text-[10px] font-black text-[#1a1b5d] z-10 border border-white/50">
-           IMPERIAL CAMPUS MAP
-        </div>
-      </div>
+  {/* 顶部标签 */}
+  <div className="absolute top-3 left-4 bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-lg shadow-sm text-[10px] font-black text-[#1a1b5d] z-10 border border-white/50">
+      IMPERIAL CAMPUS MAP
+  </div>
+
+  {/* 核心修复：增加一个“点击跳转”按钮，并使用 target="_blank" */}
+  <a 
+    href="https://www.google.com/maps/search/?api=1&query=Imperial+College+London+Washrooms"
+    target="_blank"  // 关键：在新窗口打开，防止原页面被覆盖
+    rel="noopener noreferrer" // 安全属性
+    className="absolute inset-0 z-20 flex items-center justify-center bg-[#1a1b5d]/0 group-hover:bg-[#1a1b5d]/10 transition-all cursor-pointer"
+  >
+    <div className="bg-white px-4 py-2 rounded-full shadow-lg text-[#1a1b5d] text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity transform translate-y-2 group-hover:translate-y-0">
+      Open in Full Map
+    </div>
+  </a>
+</div>
 
       {/* 3. 动态主展示卡片 (根据搜索选择显示) */}
       {selectedToilet && (

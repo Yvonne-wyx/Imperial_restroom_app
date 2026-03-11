@@ -1,12 +1,16 @@
 'use client';
+
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, Camera, Loader2, X, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, Camera, Loader2, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase } from '@/utils/supabase';
+import { useRouter } from 'next/navigation';
 
 export default function ReportPage() {
+  const router = useRouter();
+  
   // --- 状态管理 ---
-  const [toilets, setToilets] = useState<any[]>([]); // 动态厕所列表
-  const [selectedToilet, setSelectedToilet] = useState('');
+  const [toilets, setToilets] = useState<any[]>([]); 
+  const [selectedToiletId, setSelectedToiletId] = useState<string>(''); // 现在存储数字 ID 的字符串形式
   const [selectedProblems, setSelectedProblems] = useState<string[]>([]);
   const [otherDetails, setOtherDetails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -16,13 +20,14 @@ export default function ReportPage() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. 初始化：抓取真实的厕所名单
+  // 1. 初始化：抓取真实的厕所清单（包含 ID）
   useEffect(() => {
     async function fetchToilets() {
-      const { data } = await supabase.from('toilets').select('name, floor');
+      // 必须查询 id，用于数据库关联
+      const { data } = await supabase.from('toilets').select('id, name, floor').order('name');
       if (data) {
         setToilets(data);
-        if (data.length > 0) setSelectedToilet(`${data[0].name} • ${data[0].floor}`);
+        if (data.length > 0) setSelectedToiletId(data[0].id.toString());
       }
     }
     fetchToilets();
@@ -33,7 +38,7 @@ export default function ReportPage() {
     const file = e.target.files?.[0];
     if (file) {
       setImageFile(file);
-      setImagePreview(URL.createObjectURL(file)); // 生成预览图
+      setImagePreview(URL.createObjectURL(file));
     }
   };
 
@@ -45,24 +50,39 @@ export default function ReportPage() {
 
   // 3. 核心提交逻辑
   const handleSubmit = async () => {
-    if (selectedProblems.length === 0 && !otherDetails) {
-      alert('Please provide some details.'); return;
+    // A. 基础校验
+    if (!selectedToiletId) {
+      alert('Please select a toilet.'); return;
     }
+    if (selectedProblems.length === 0 && !otherDetails) {
+      alert('Please provide some details about the issue.'); return;
+    }
+
     setIsSubmitting(true);
 
     try {
+      // B. 身份校验：获取当前登录用户
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert('Please sign in to submit a report.');
+        router.push('/account'); // 引导去登录
+        return;
+      }
+
       let photoUrl = null;
 
-      // 如果有图片，先上传到 Supabase Storage
+      // C. 图片上传逻辑 (确保你的 Supabase Storage 已经创建了 'toilet-photos' 存储桶并设为 Public)
       if (imageFile) {
-        const fileName = `${Date.now()}_${imageFile.name}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const fileExt = imageFile.name.split('.').pop();
+        const fileName = `${session.user.id}_${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
           .from('toilet-photos')
           .upload(fileName, imageFile);
 
         if (uploadError) throw uploadError;
 
-        // 获取图片的公开访问链接
         const { data: publicUrlData } = supabase.storage
           .from('toilet-photos')
           .getPublicUrl(fileName);
@@ -70,27 +90,34 @@ export default function ReportPage() {
         photoUrl = publicUrlData.publicUrl;
       }
 
-      // 存入 reports 表
+      // D. 存入 reports 表
       const { error: insertError } = await supabase
         .from('reports')
         .insert([{
-          toilet_name: selectedToilet,
-          problems: selectedProblems,
-          other_details: otherDetails,
-          photo_url: photoUrl // 把图片链接存进去
+          user_id: session.user.id,             // 关联登录用户
+          toilet_id: parseInt(selectedToiletId), // 关联厕所 ID (转为整数)
+          problems: selectedProblems,           // 选中的问题数组
+          other_details: otherDetails,          // 详细描述
+          photo_url: photoUrl,                  // 图片链接
+          status: 'Pending'                     // 初始状态
         }]);
 
       if (insertError) throw insertError;
 
-      alert('Report submitted! Our team will check it soon.');
-      // 重置表单
+      // E. 成功反馈并跳转
+      alert('Report submitted! You can track the progress in your account.');
+      
+      // 清空本地状态
       setSelectedProblems([]);
       setOtherDetails('');
       setImageFile(null);
       setImagePreview(null);
 
+      // 跳转到个人中心查看 My Reports
+      router.push('/account');
+
     } catch (error: any) {
-      alert('Error: ' + error.message);
+      alert('Submission failed: ' + error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -98,58 +125,71 @@ export default function ReportPage() {
 
   return (
     <div className="flex flex-col p-5 space-y-6 pb-24 bg-white min-h-screen">
-      <div>
-        <h1 className="text-2xl font-bold text-[#1a1b5d]">Report a Problem</h1>
-        <p className="text-gray-400 text-sm mt-2">Help us keep our restrooms in top condition.</p>
+      
+      {/* 1. Header */}
+      <div className="pt-2">
+        <h1 className="text-2xl font-black text-[#1a1b5d] tracking-tight">Report Issue</h1>
+        <p className="text-gray-400 text-xs font-medium mt-1 uppercase tracking-wider">Help us maintain the standard</p>
       </div>
 
-      {/* 动态下拉框 */}
-      <div className="relative">
-        <select 
-          value={selectedToilet}
-          onChange={(e) => setSelectedToilet(e.target.value)}
-          className="w-full appearance-none bg-[#f4f5fa] border border-gray-100 text-[#1a1b5d] text-sm py-3.5 px-4 rounded-xl focus:outline-none"
-        >
-          {toilets.map((t, i) => (
-            <option key={i}>{t.name} • {t.floor}</option>
-          ))}
-        </select>
-        <ChevronDown className="absolute right-4 top-4 w-5 h-5 text-[#1a1b5d] pointer-events-none" />
+      {/* 2. 厕所选择下拉框 */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-black text-[#1a1b5d] uppercase ml-1 opacity-60">Location</label>
+        <div className="relative">
+          <select 
+            value={selectedToiletId}
+            onChange={(e) => setSelectedToiletId(e.target.value)}
+            className="w-full appearance-none bg-[#f8f9fc] border border-gray-100 text-[#1a1b5d] text-sm py-4 px-4 rounded-2xl focus:outline-none font-bold"
+          >
+            {toilets.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} • {t.floor}</option>
+            ))}
+          </select>
+          <ChevronDown className="absolute right-4 top-4.5 w-4 h-4 text-[#1a1b5d] pointer-events-none" />
+        </div>
       </div>
 
-      {/* 问题勾选 */}
+      {/* 3. 问题类型勾选 */}
       <div className="space-y-3">
-        <h2 className="text-[#1a1b5d] font-bold text-sm">Select the problem(s)</h2>
-        <div className="grid grid-cols-1 gap-3">
-          {['No toilet paper', 'Soap empty', 'Broken lock', 'Dirty cubicle'].map((prob) => (
+        <label className="text-[10px] font-black text-[#1a1b5d] uppercase ml-1 opacity-60">What's wrong?</label>
+        <div className="grid grid-cols-2 gap-3">
+          {['No paper', 'No soap', 'Clogged', 'Dirty', 'Broken lock', 'No water'].map((prob) => (
             <div 
               key={prob}
               onClick={() => toggleProblem(prob)}
-              className={`flex items-center p-3 rounded-xl border transition-all ${
-                selectedProblems.includes(prob) ? 'border-[#1a1b5d] bg-blue-50' : 'border-gray-100 bg-white'
+              className={`flex items-center p-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                selectedProblems.includes(prob) 
+                ? 'border-[#1a1b5d] bg-[#f4f5ff]' 
+                : 'border-gray-50 bg-[#f8f9fc]'
               }`}
             >
-              <div className={`w-5 h-5 rounded-md border mr-3 flex items-center justify-center ${
-                selectedProblems.includes(prob) ? 'bg-[#1a1b5d] border-[#1a1b5d]' : 'border-gray-300'
+              <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
+                selectedProblems.includes(prob) ? 'bg-[#1a1b5d] border-[#1a1b5d]' : 'border-gray-300 bg-white'
               }`}>
-                {selectedProblems.includes(prob) && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                {selectedProblems.includes(prob) && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
               </div>
-              <span className="text-sm text-[#1a1b5d] font-medium">{prob}</span>
+              <span className={`text-xs font-bold ${selectedProblems.includes(prob) ? 'text-[#1a1b5d]' : 'text-gray-400'}`}>
+                {prob}
+              </span>
             </div>
           ))}
         </div>
       </div>
 
-      <textarea
-        value={otherDetails}
-        onChange={(e) => setOtherDetails(e.target.value)}
-        placeholder="Other details..."
-        className="w-full bg-[#f4f5fa] rounded-xl p-4 text-sm h-24 focus:outline-none"
-      />
+      {/* 4. 文字描述 */}
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-black text-[#1a1b5d] uppercase ml-1 opacity-60">Additional Info</label>
+        <textarea
+          value={otherDetails}
+          onChange={(e) => setOtherDetails(e.target.value)}
+          placeholder="e.g. The third cubicle from the left..."
+          className="w-full bg-[#f8f9fc] border-none rounded-2xl p-4 text-sm font-bold text-[#1a1b5d] h-28 focus:ring-2 focus:ring-[#1a1b5d] placeholder:text-gray-300 placeholder:font-normal"
+        />
+      </div>
 
-      {/* 图片上传区域 */}
+      {/* 5. 图片上传 */}
       <div className="space-y-3">
-        <h2 className="text-[#1a1b5d] font-bold text-sm">Optional photo</h2>
+        <label className="text-[10px] font-black text-[#1a1b5d] uppercase ml-1 opacity-60">Proof (Optional)</label>
         
         <input 
           type="file" 
@@ -162,17 +202,17 @@ export default function ReportPage() {
         {!imagePreview ? (
           <button 
             onClick={() => fileInputRef.current?.click()}
-            className="w-full border-2 border-dashed border-gray-100 bg-[#f8f9fc] rounded-2xl py-10 flex flex-col items-center justify-center group hover:bg-gray-50 transition-all"
+            className="w-full border-2 border-dashed border-gray-100 bg-[#f8f9fc] rounded-[24px] py-8 flex flex-col items-center justify-center active:scale-[0.98] transition-all"
           >
-            <Camera className="w-8 h-8 text-[#1a1b5d] mb-2 opacity-40 group-hover:opacity-100" />
-            <span className="text-xs text-[#1a1b5d] font-bold">Add a photo</span>
+            <Camera className="w-6 h-6 text-[#1a1b5d] mb-2 opacity-30" />
+            <span className="text-[10px] text-[#1a1b5d] font-black uppercase tracking-widest">Attach Photo</span>
           </button>
         ) : (
-          <div className="relative rounded-2xl overflow-hidden border border-gray-100 shadow-sm animate-in fade-in">
+          <div className="relative rounded-2xl overflow-hidden border-4 border-white shadow-lg animate-in zoom-in-95">
             <img src={imagePreview} alt="preview" className="w-full h-48 object-cover" />
             <button 
               onClick={() => {setImageFile(null); setImagePreview(null);}}
-              className="absolute top-2 right-2 bg-black/50 p-1.5 rounded-full text-white backdrop-blur-md"
+              className="absolute top-3 right-3 bg-black/50 p-2 rounded-full text-white backdrop-blur-md"
             >
               <X className="w-4 h-4" />
             </button>
@@ -180,13 +220,27 @@ export default function ReportPage() {
         )}
       </div>
 
+      {/* 6. 提交按钮 */}
       <button 
         onClick={handleSubmit}
         disabled={isSubmitting}
-        className="w-full bg-[#1a1b5d] text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-all flex justify-center items-center"
+        className="w-full bg-[#1a1b5d] text-white font-black py-4 rounded-2xl shadow-xl shadow-blue-900/10 active:scale-95 transition-all flex justify-center items-center space-x-2 disabled:opacity-50"
       >
-        {isSubmitting ? <Loader2 className="animate-spin" /> : 'Submit report'}
+        {isSubmitting ? (
+          <Loader2 className="w-5 h-5 animate-spin" />
+        ) : (
+          <>
+            <CheckCircle2 className="w-5 h-5" />
+            <span className="uppercase tracking-widest text-sm">Submit Report</span>
+          </>
+        )}
       </button>
+
+      {/* 提示信息 */}
+      <div className="flex items-start space-x-2 px-1">
+        <AlertCircle className="w-3.5 h-3.5 text-gray-300 mt-0.5" />
+        <p className="text-[10px] text-gray-400 font-medium">Your report will be sent to the campus facilities team. You can track its status in the Account tab.</p>
+      </div>
     </div>
   );
 }
